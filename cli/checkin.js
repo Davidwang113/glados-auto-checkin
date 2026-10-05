@@ -293,7 +293,8 @@ async function runCheckin(options = {}) {
 
   let accounts;
   try {
-    accounts = parseAccounts(rawSecret);
+    // The daily runner reuses these objects so successful accounts keep _done.
+    accounts = options.accounts || parseAccounts(rawSecret);
   } catch (error) {
     const message = redactSecrets(error.message || String(error), secrets);
     logger.error(message);

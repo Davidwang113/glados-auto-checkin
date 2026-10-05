@@ -20,6 +20,7 @@ const {
 } = core;
 
 const { runCheckin, resolveOrigins, main } = checkinCli;
+const { runDailyCheckin, RETRY_INTERVAL_MS } = require("./cli/checkin-daily");
 
 function createLogger() {
   const lines = { info: [], warn: [], error: [] };
@@ -475,6 +476,75 @@ async function testMainHelp() {
 
 // --- workflow structure checks ---
 
+async function testDailyRunnerStopsOnSuccess() {
+  for (const response of [{ list: [{ change: 1, balance: 10 }] }, { code: 1 }]) {
+    const fetchImpl = buildFetch([
+      jsonResponse({ code: 0, data: { email: "test@example.com", leftDays: 10 } }),
+      jsonResponse(response),
+      jsonResponse({ code: 0, points: 10 }),
+    ]);
+    const outcome = await runDailyCheckin({
+      env: { GLADOS_COOKIE: sampleCookie("daily") },
+      logger: createLogger(), fetch: fetchImpl,
+      wait: async () => { throw new Error("Must not retry after success"); },
+    });
+    assert.equal(outcome.exitCode, 0);
+    assert.equal(fetchImpl.calls.length, 3);
+  }
+}
+
+async function testDailyRunnerRetriesOnlyFailedAccounts() {
+  const status = jsonResponse({ code: 0, data: { email: "test@example.com", leftDays: 10 } });
+  const success = jsonResponse({ list: [{ change: 1, balance: 10 }] });
+  const points = jsonResponse({ code: 0, points: 10 });
+  const fetchImpl = buildFetch([
+    status, success, points,
+    status, jsonResponse({ code: -9, message: "temporary failure" }),
+    status, success, points,
+  ]);
+  const waits = [];
+  const outcome = await runDailyCheckin({
+    env: { GLADOS_COOKIE: JSON.stringify([
+      { cookie: sampleCookie("first"), origin: "https://glados.cloud" },
+      { cookie: sampleCookie("second"), origin: "https://glados.rocks" },
+    ]) },
+    logger: createLogger(), fetch: fetchImpl,
+    wait: async (ms) => waits.push(ms),
+  });
+  assert.equal(outcome.exitCode, 0);
+  assert.equal(outcome.results[0].skipped, true);
+  assert.deepEqual(waits, [RETRY_INTERVAL_MS]);
+  assert.equal(fetchImpl.calls.filter((call) => call.url.startsWith("https://glados.cloud")).length, 3);
+  assert.equal(fetchImpl.calls.filter((call) => call.url.startsWith("https://glados.rocks")).length, 5);
+}
+
+async function testDailyRunnerFailsAfterThreeAttempts() {
+  const handlers = [];
+  for (let i = 0; i < 3; i += 1) handlers.push(
+    jsonResponse({ code: 0, data: { email: "test@example.com", leftDays: 10 } }),
+    jsonResponse({ code: -9, message: "temporary failure" })
+  );
+  const fetchImpl = buildFetch(handlers);
+  let waits = 0;
+  const outcome = await runDailyCheckin({
+    env: { GLADOS_COOKIE: sampleCookie("failed") },
+    logger: createLogger(), fetch: fetchImpl,
+    wait: async () => { waits += 1; },
+  });
+  assert.equal(outcome.exitCode, 1);
+  assert.equal(waits, 2);
+  assert.equal(fetchImpl.calls.length, 6);
+}
+
+async function testDailyRunnerRejectsInvalidSecretWithoutRetry() {
+  const outcome = await runDailyCheckin({
+    env: {}, logger: createLogger(),
+    fetch: async () => { throw new Error("Must not send a request"); },
+    wait: async () => { throw new Error("Must not wait"); },
+  });
+  assert.equal(outcome.exitCode, 1);
+}
+
 function testWorkflowYamlStructure() {
   const workflowPath = path.join(__dirname, ".github/workflows/checkin.yml");
   const text = fs.readFileSync(workflowPath, "utf8");
@@ -483,14 +553,13 @@ function testWorkflowYamlStructure() {
   assert.match(text, /workflow_dispatch:/);
   assert.match(text, /schedule:/);
   assert.match(text, /cron:\s*"15 23 \* \* \*"/);
-  assert.match(text, /cron:\s*"15 7 \* \* \*"/);
+  assert.equal((text.match(/cron:/g) || []).length, 1);
   assert.match(text, /permissions:\s*\n\s*contents:\s*read/);
   assert.match(text, /node-version:\s*24/);
   assert.match(text, /secrets\.GLADOS_COOKIE/);
-  assert.match(text, /node cli\/checkin\.js/);
+  assert.match(text, /node cli\/checkin-daily\.js/);
   assert.match(text, /北京时间|Beijing/i);
   assert.match(text, /07:15/);
-  assert.match(text, /15:15/);
   // Must not hardcode real cookies
   assert.doesNotMatch(text, /koa:sess=[A-Za-z0-9._-]+/);
   // Minimal permissions only
@@ -542,6 +611,10 @@ async function run() {
     ["skip repeat within run", testSkipRepeatWithinSameRun],
     ["login expired exit 1", testLoginExpiredExitOne],
     ["main --help", testMainHelp],
+    ["daily success/already-checked stops retries", testDailyRunnerStopsOnSuccess],
+    ["daily retries only failed accounts", testDailyRunnerRetriesOnlyFailedAccounts],
+    ["daily failure stops after three attempts", testDailyRunnerFailsAfterThreeAttempts],
+    ["daily invalid secret does not retry", testDailyRunnerRejectsInvalidSecretWithoutRetry],
     ["workflow YAML structure", testWorkflowYamlStructure],
     ["package scripts/version", testPackageScriptsAndVersion],
     ["existing scripts dynamic token", testExistingScriptsUseDynamicToken],

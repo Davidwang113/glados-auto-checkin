@@ -2,7 +2,8 @@
 #
 # Schedule times are UTC. Beijing time (UTC+8) equivalents:
 #   - 23:15 UTC → 07:15 北京时间（次日凌晨前一天的 UTC 对应早上签到）
-#   - 07:15 UTC → 15:15 北京时间
+# A single daily run retries failures internally, then sends one GitHub result
+# notification. Successful accounts are never requested again during retries.
 #
 # GitHub may delay or skip schedule triggers on inactive forks.
 # Use workflow_dispatch for manual runs, or an external cron that POSTs
@@ -14,8 +15,6 @@ on:
   schedule:
     # 07:15 Beijing (UTC+8) = 23:15 UTC
     - cron: "15 23 * * *"
-    # 15:15 Beijing (UTC+8) = 07:15 UTC
-    - cron: "15 7 * * *"
   workflow_dispatch:
 
 permissions:
@@ -24,7 +23,7 @@ permissions:
 jobs:
   checkin:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 50
 
     steps:
       - name: Check out repository
@@ -40,4 +39,4 @@ jobs:
         env:
           # Repository Secret — never echo or print this value.
           GLADOS_COOKIE: ${{ secrets.GLADOS_COOKIE }}
-        run: node cli/checkin.js
+        run: node cli/checkin-daily.js

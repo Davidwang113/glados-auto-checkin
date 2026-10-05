@@ -39,6 +39,8 @@ ScriptCat 安装页：`https://scriptcat.org/zh-CN/script-show-page/7014`
 
 ## 当前状态
 
+- 本 Fork（Davidwang113）定制：Actions 每日一次（北京时间 07:15），`cli/checkin-daily.js` 在同一次运行内仅重试失败账号，每隔 15 分钟、最多 3 轮；成功立即结束，避免第二封定时成功邮件。维护或合并上游时保留这项定制。
+
 - 代码 / 文档 / GitHub Raw / ScriptCat 1.7.0 已对齐 `glados-facility.com`；1.7.0 起镜像域名探测失败只作通知附注，不再判定整体签到失败（后端已将数字字段序列化为字符串，脚本已兼容）
 - 无项目级 CLAUDE.md；本文件为 Codex/Agent 入口
 - 发布细节见 `~/.codex/memories/skills/glados-auto-checkin-release/SKILL.md`

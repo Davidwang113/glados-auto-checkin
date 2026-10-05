@@ -200,14 +200,15 @@ If one account fails, the script still processes the rest, but the overall job i
 
 #### 5. Automatic schedule
 
-The workflow runs twice per day. GitHub `schedule` uses **UTC**:
+This fork runs one daily workflow. GitHub `schedule` uses **UTC**:
 
 | Cron (UTC) | Beijing time (UTC+8) | Role |
 | :--- | :--- | :--- |
-| `15 23 * * *` | **07:15** | Morning candidate |
-| `15 7 * * *` | **15:15** | Afternoon fallback |
+| `15 23 * * *` | **07:15** | Daily check-in |
 
-Within **one run**, an account that already succeeded or was already checked in is not checked in again. Across the two daily schedules, a second run that receives “already checked in” still exits `0`.
+Success or an already-checked response ends the run immediately. Failed accounts retry every 15 minutes within the same run, up to three attempts. Successful accounts are skipped on retries. GitHub sends one completion notification for the whole run, avoiding a second afternoon success email. Manually starting a new run still generates a separate notification.
+
+GitHub delivers the email; the workflow cannot confirm inbox delivery. Keep Actions email notifications enabled.
 
 > [!WARNING]
 > GitHub documents that scheduled workflows are disabled by default on public forks and may also be disabled after 60 days without repository activity. Re-enable the workflow and run it manually if the schedule stops. Scheduled jobs may also be queued and are not guaranteed to start at the exact minute. See [GitHub's workflow documentation](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/disable-and-enable-workflows).
